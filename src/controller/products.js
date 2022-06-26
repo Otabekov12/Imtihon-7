@@ -3,34 +3,48 @@ import { read, write } from "../utils/model.js";
 
 const GET = (req, res, next) => {
   try {
-    let { id, model, product_name, color, price } = req.query;
+    let { id, model, productName, color, price, categoryId, subCategoryId } = req.query;
     if (req.params.productId) id = req.params.productId;
 
+    const products = read("products");
     const subCategories = read("subCategories");
 
-    const categories = read("categories").map((category) => {
-      category.subCategories = subCategories.filter(
-        (subCategory) => category.categoryId == subCategory.categoryId
+    let data = [];
+    if (categoryId) {
+      let filtredsSubategories = subCategories.filter(
+        (subCategory) => subCategory.categoryId == categoryId
       );
-
-      category.subCategories = category.subCategories.map((subCategory) => {
-        delete subCategory.categoryId;
-        return subCategory;
+      filtredsSubategories.forEach((subCategory) => {
+        products.forEach((product) => {
+          if (product.subCategoryId == subCategory.subCategoryId) data.push(product);
+        });
       });
 
-      return category;
-    });
+      data = data.filter((item) => item.productId);
+    } else {
+      data = products.filter((product) => {
+        let byProductId = id ? product.productId == id : true;
+        let byProductName = productName
+          ? product.productName.toLowerCase().includes(productName.toLowerCase())
+          : true;
+        let byProductModel = model
+          ? product.model.toLowerCase().includes(model.toLowerCase())
+          : true;
+        let byProductColor = color ? product.color == color : true;
+        let byProductPrice = price ? product.price == price : true;
+        let byProductSubCategoryId = subCategoryId ? product.subCategoryId == subCategoryId : true;
 
-    let data = categories.filter((category) => {
-      let byCategoryId = id ? category.categoryId == id : true;
-      let byCategoryName = name
-        ? category.categoryName.toLowerCase().includes(name.toLowerCase())
-        : true;
-
-      return byCategoryId && byCategoryName;
-    });
-
-    if (!data.length) return next(new NotFoundError(404, "this category not found"));
+        return (
+          byProductId &&
+          byProductName &&
+          byProductModel &&
+          byProductColor &&
+          byProductPrice &&
+          byProductSubCategoryId
+        );
+      });
+    }
+    if (!data.length) return next(new NotFoundError(404, "this product not found"));
 
     res.status(200).json({
       status: 200,
@@ -43,34 +57,25 @@ const GET = (req, res, next) => {
 
 const POST = (req, res, next) => {
   try {
-    const { categoryName } = req.body;
+    const { subCategoryId, productName, price, color, model } = req.body;
 
-    const categories = read("categories");
     const subCategories = read("subCategories");
+    const products = read("products");
 
-    const data = categories.find(
-      (category) => category.categoryName.toLowerCase() == categoryName.toLowerCase()
+    const checkSubCategoryId = subCategories.find(
+      (subCategory) => subCategory.subCategoryId == subCategoryId
     );
+    if (!checkSubCategoryId)
+      return next(new AuthorizationError(401, "this category does not exist"));
 
-    if (data) return next(new AuthorizationError(401, "this category name exits"));
+    req.body.productId = products.length ? products.at(-1).productId + 1 : 1;
 
-    req.body.categoryId = categories.length ? categories.at(-1).categoryId + 1 : 1;
-
-    categories.push(req.body);
-    write("categories", categories);
-
-    req.body.subCategories = subCategories.filter(
-      (subCategory) => subCategory.categoryId == req.body.categoryId
-    );
-
-    req.body.subCategories = req.body.subCategories.map((subCategory) => {
-      delete subCategory.categoryId;
-      return subCategory;
-    });
+    products.push(req.body);
+    write("products", products);
 
     res.status(201).json({
       status: 201,
-      message: "category created",
+      message: "product created",
       data: req.body,
     });
   } catch (error) {
@@ -80,32 +85,34 @@ const POST = (req, res, next) => {
 
 const PUT = (req, res, next) => {
   try {
-    const { categoryId } = req.params;
+    const { subCategoryId, productName, price, color, model } = req.body;
+    const { productId } = req.params;
 
-    const categories = read("categories");
     const subCategories = read("subCategories");
+    const products = read("products");
 
-    let category = categories.find((category) => categoryId == category.categoryId);
+    let product = products.find((product) => productId == product.productId);
 
-    if (!category) return next(new NotFoundError(404, "category not found"));
+    if (!product) return next(new NotFoundError(404, "product not found"));
 
-    category.categoryName = req.body.categoryName || category.categoryName;
-
-    write("categories", categories);
-
-    category.subCategories = subCategories.filter(
-      (subCategory) => subCategory.categoryId == category.categoryId
+    const checkSubCategoryId = subCategories.find(
+      (subCategory) => subCategory.subCategoryId == subCategoryId
     );
+    if (!checkSubCategoryId)
+      return next(new AuthorizationError(401, "this category does not exist"));
 
-    category.subCategories = category.subCategories.map((subCategory) => {
-      delete subCategory.categoryId;
-      return subCategory;
-    });
+    product.subCategoryId = subCategoryId || product.subCategoryId;
+    product.productName = productName || product.productName;
+    product.price = price || product.price;
+    product.color = color || product.color;
+    product.model = model || product.model;
 
-    res.status(200).json({
-      status: 200,
-      message: "category updated",
-      data: category,
+    write("products", products);
+
+    res.status(201).json({
+      status: 201,
+      message: "product updated",
+      data: product,
     });
   } catch (error) {
     return next(new InternalServerError(500, error.message));
@@ -114,32 +121,22 @@ const PUT = (req, res, next) => {
 
 const DELETE = (req, res, next) => {
   try {
-    const { categoryId } = req.params;
+    const { productId } = req.params;
 
-    const categories = read("categories");
-    const subCategories = read("subCategories");
+    const products = read("products");
 
-    let categoryIndex = categories.findIndex((category) => categoryId == category.categoryId);
+    let productIndex = products.findIndex((product) => productId == product.productId);
 
-    if (categoryIndex == -1) return next(new NotFoundError(404, "category not found"));
+    if (productIndex == -1) return next(new NotFoundError(404, "product not found"));
 
-    let [category] = categories.splice(categoryIndex, 1);
+    let [product] = products.splice(productIndex, 1);
 
-    write("categories", categories);
-
-    category.subCategories = subCategories.filter(
-      (subCategory) => subCategory.categoryId == category.categoryId
-    );
-
-    category.subCategories = category.subCategories.map((subCategory) => {
-      delete subCategory.categoryId;
-      return subCategory;
-    });
+    write("products", products);
 
     res.status(200).json({
       status: 200,
-      message: "category deleted",
-      data: category,
+      message: "product deleted",
+      data: product,
     });
   } catch (error) {
     return next(new InternalServerError(500, error.message));
@@ -147,3 +144,4 @@ const DELETE = (req, res, next) => {
 };
 
 export default { GET, POST, PUT, DELETE };
+
